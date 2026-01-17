@@ -24,7 +24,7 @@
     },
     "scripts": {
         "installation": {
-            "script": "#!/bin/bash\napt-get update\napt-get install -y curl ca-certificates\nbash <(curl -sL https://raw.githubusercontent.com/MangoTeamSCPSL/SCPSL-Egg/main/docker/install.sh)",
+            "script": "#!/bin/bash\napt-get update\napt-get install -y curl ca-certificates\nbash <(curl -sL https://raw.githubusercontent.com/Ducstii/SCPSL-Egg/main/docker/install.sh)",
             "container": "ubuntu:24.04",
             "entrypoint": "bash"
         }
