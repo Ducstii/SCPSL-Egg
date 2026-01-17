@@ -26,7 +26,7 @@ log_error() {
 }
 
 echo "###############################################################"
-echo "#           SCP:SL Server Installer (Minimal)                 #"
+echo "#                 SCP:SL Server Installer                      #"
 echo "#              With Exiled Framework Support                   #"
 echo "###############################################################"
 
@@ -123,7 +123,7 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
     if curl -L "$EXILED_URL" -o Exiled.Installer-Linux; then
         chmod +x Exiled.Installer-Linux
         
-        # Build installer arguments - only use valid flags
+        # Build installer arguments 
         EXILED_ARGS="--path /mnt/server/.bin/SCPSLDS --appdata /mnt/server/.config/"
         
         if [ "$SCPSL_EXILED" -eq 2 ]; then
