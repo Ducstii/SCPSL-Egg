@@ -1,0 +1,74 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2025-01-10T16:00:00+03:00",
+    "name": "SCP Secret Laboratory",
+    "author": "MangoTeam",
+    "description": "Minimal SCP:SL server egg with Exiled framework support",
+    "features": [
+        "exiled"
+    ],
+    "docker_images": {
+        "naxefir2/scpsl-egg": "naxefir2/scpsl-egg:latest"
+    },
+    "file_denylist": [],
+    "startup": "cd .bin/SCPSLDS && ./LocalAdmin {{SCPSL_PORT}}",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\": \"Waiting for players..\"}",
+        "logs": "{}",
+        "stop": "exit"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\napt-get update\napt-get install -y curl ca-certificates\nbash <(curl -sL https://raw.githubusercontent.com/MangoTeamSCPSL/SCPSL-Egg/main/docker/install.sh)",
+            "container": "ubuntu:24.04",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Server Port",
+            "description": "Game server port (default: 7777)",
+            "env_variable": "SCPSL_PORT",
+            "default_value": "7777",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer|between:1024,65535",
+            "field_type": "text"
+        },
+        {
+            "name": "Exiled Installation",
+            "description": "Install Exiled framework: 0=No, 1=Stable (recommended), 2=Pre-release",
+            "env_variable": "SCPSL_EXILED",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer|in:0,1,2",
+            "field_type": "text"
+        },
+        {
+            "name": "Beta Branch",
+            "description": "SteamCMD beta branch (use 'public' for stable release)",
+            "env_variable": "SCPSL_BETA_NAME",
+            "default_value": "public",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:50",
+            "field_type": "text"
+        },
+        {
+            "name": "Beta Password",
+            "description": "Beta branch password (use 'none' if not needed)",
+            "env_variable": "SCPSL_BETA_PASS",
+            "default_value": "none",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:200",
+            "field_type": "text"
+        }
+    ]
+}
