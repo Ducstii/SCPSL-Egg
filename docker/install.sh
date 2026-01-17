@@ -107,8 +107,9 @@ log_success "SCP:SL server installed"
 # Install Exiled
 if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
     log_info "Installing Exiled framework..."
-    mkdir -p /mnt/server/.bin/ExiledInstaller
-    cd /mnt/server/.bin/ExiledInstaller
+    EXILED_TEMP_DIR="/mnt/server/.bin/ExiledInstaller"
+    mkdir -p "$EXILED_TEMP_DIR"
+    cd "$EXILED_TEMP_DIR"
     
     # Download Exiled installer
     EXILED_URL="https://github.com/Exiled-Team/EXILED/releases/latest/download/Exiled.Installer-Linux"
@@ -120,43 +121,69 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
     fi
     
     log_info "Downloading Exiled installer from: $EXILED_URL"
-    if curl -L "$EXILED_URL" -o Exiled.Installer-Linux; then
+    if curl -L -f "$EXILED_URL" -o Exiled.Installer-Linux; then
         chmod +x Exiled.Installer-Linux
         
-        # Build installer arguments 
-        EXILED_ARGS="--path /mnt/server/.bin/SCPSLDS --appdata /mnt/server/.config/"
-        
-        if [ "$SCPSL_EXILED" -eq 2 ]; then
-            EXILED_ARGS="$EXILED_ARGS --pre-releases"
-        fi
-        
-        log_info "Running Exiled installer with arguments: $EXILED_ARGS"
-        if ./Exiled.Installer-Linux $EXILED_ARGS; then
-            # Verify Exiled installation
-            EXILED_DLL="/mnt/server/.bin/SCPSLDS/SCPSL_Data/Managed/Assembly-CSharp.dll"
-            EXILED_CONFIG="/mnt/server/.config/EXILED"
+        # Verify the installer was downloaded correctly (not HTML error page)
+        if ! file Exiled.Installer-Linux | grep -qE "(ELF|executable|binary)"; then
+            log_error "Downloaded file is not a valid executable"
+            log_error "This might be a GitHub error page. Check the URL: $EXILED_URL"
+            rm -f Exiled.Installer-Linux
+        else
+            # Build installer arguments - run from server directory
+            SERVER_DIR="/mnt/server/.bin/SCPSLDS"
+            APPDATA_DIR="/mnt/server/.config"
+            
+            # Copy installer to server directory and run from there
+            cp Exiled.Installer-Linux "$SERVER_DIR/"
+            cd "$SERVER_DIR"
+            
+            # Build installer command
+            INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\""
+            
+            if [ "$SCPSL_EXILED" -eq 2 ]; then
+                INSTALLER_CMD="$INSTALLER_CMD --pre-releases"
+            fi
+            
+            log_info "Running Exiled installer from server directory..."
+            log_info "Command: $INSTALLER_CMD"
+            
+            # Temporarily disable exit on error to capture installer output
+            set +e
+            INSTALLER_OUTPUT=$(eval $INSTALLER_CMD 2>&1)
+            INSTALLER_EXIT=$?
+            set -e
+            
+            # Show installer output
+            echo "$INSTALLER_OUTPUT"
+            
+            # Remove installer from server directory after use
+            rm -f "$SERVER_DIR/Exiled.Installer-Linux"
+            
+            # Verify Exiled installation regardless of exit code (installer may return non-zero even on success)
+            EXILED_DLL="$SERVER_DIR/SCPSL_Data/Managed/Assembly-CSharp.dll"
+            EXILED_CONFIG="$APPDATA_DIR/EXILED"
             
             if [ -f "$EXILED_DLL" ] && [ -d "$EXILED_CONFIG" ]; then
                 log_success "Exiled installed successfully and verified!"
-                log_info "  - Assembly-CSharp.dll found"
-                log_info "  - EXILED config directory found"
+                log_info "  - Assembly-CSharp.dll found at $EXILED_DLL"
+                log_info "  - EXILED config directory found at $EXILED_CONFIG"
             else
-                log_warning "Exiled installer completed but verification failed:"
+                log_warning "Exiled installation verification failed:"
                 [ ! -f "$EXILED_DLL" ] && log_warning "  - Assembly-CSharp.dll not found at $EXILED_DLL"
                 [ ! -d "$EXILED_CONFIG" ] && log_warning "  - EXILED directory not found at $EXILED_CONFIG"
-                log_warning "Exiled may still work, but installation may be incomplete"
-            fi
-        else
-            log_error "Exiled installer exited with an error"
-            if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
-                log_error "Exiled installation is enabled but failed. Server may not function correctly."
+                
+                # Check if installer gave any hints in output
+                if echo "$INSTALLER_OUTPUT" | grep -qi "error\|failed\|cannot"; then
+                    log_error "Installer output indicates an error occurred"
+                fi
+                
+                log_error "Exiled installation may have failed. Please check the installer output above."
             fi
         fi
     else
         log_error "Failed to download Exiled installer from $EXILED_URL"
-        if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
-            log_error "Exiled installation is enabled but download failed. Server may not function correctly."
-        fi
+        log_error "This could be due to network issues or the URL being incorrect"
     fi
 else
     log_info "Skipping Exiled installation (disabled)"
