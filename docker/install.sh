@@ -139,7 +139,8 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
             cd "$SERVER_DIR"
             
             # Build installer command
-            INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\""
+            # --exiled is REQUIRED and should point to the .config directory (installer creates EXILED subfolder)
+            INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\" --exiled \"$APPDATA_DIR\""
             
             if [ "$SCPSL_EXILED" -eq 2 ]; then
                 INSTALLER_CMD="$INSTALLER_CMD --pre-releases"
@@ -162,16 +163,15 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
             
             # Verify Exiled installation regardless of exit code (installer may return non-zero even on success)
             EXILED_DLL="$SERVER_DIR/SCPSL_Data/Managed/Assembly-CSharp.dll"
-            EXILED_CONFIG="$APPDATA_DIR/EXILED"
+            EXILED_PLUGINS_DIR="$APPDATA_DIR/SCP Secret Laboratory/LabAPI/plugins/global"
             
-            if [ -f "$EXILED_DLL" ] && [ -d "$EXILED_CONFIG" ]; then
+            if [ -f "$EXILED_DLL" ] && [ -d "$EXILED_PLUGINS_DIR" ]; then
                 log_success "Exiled installed successfully and verified!"
-                log_info "  - Assembly-CSharp.dll found at $EXILED_DLL"
-                log_info "  - EXILED config directory found at $EXILED_CONFIG"
+                log_info "  - Exiled plugins directory found at $EXILED_PLUGINS_DIR"
             else
                 log_warning "Exiled installation verification failed:"
                 [ ! -f "$EXILED_DLL" ] && log_warning "  - Assembly-CSharp.dll not found at $EXILED_DLL"
-                [ ! -d "$EXILED_CONFIG" ] && log_warning "  - EXILED directory not found at $EXILED_CONFIG"
+                [ ! -d "$EXILED_PLUGINS_DIR" ] && log_warning "  - Exiled plugins directory not found at $EXILED_PLUGINS_DIR"
                 
                 # Check if installer gave any hints in output
                 if echo "$INSTALLER_OUTPUT" | grep -qi "error\|failed\|cannot"; then
