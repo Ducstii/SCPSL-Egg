@@ -6,7 +6,7 @@
     },
     "exported_at": "2025-01-10T16:00:00+03:00",
     "name": "SCP Secret Laboratory",
-    "author": "MangoTeam",
+    "author": "operated31@gmail.com",
     "description": "Minimal SCP:SL server egg with Exiled framework support",
     "features": [
         "exiled"
