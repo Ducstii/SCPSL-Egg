@@ -102,8 +102,7 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
     mkdir -p "$EXILED_TEMP_DIR"
     cd "$EXILED_TEMP_DIR"
     
-    EXILED_URL="https://github.com/Exiled-Team/EXILED/releases/latest/download/Exiled.Installer-Linux"
-    
+    EXILED_URL="https://github.com/ExMod-Team/EXILED/releases/download/latest/Exiled.Installer-Linux"
     if [ "$SCPSL_EXILED" -eq 2 ]; then
         log_info "Using Exiled pre-release version"
     else
