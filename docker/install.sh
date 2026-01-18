@@ -102,18 +102,58 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
     mkdir -p "$EXILED_TEMP_DIR"
     cd "$EXILED_TEMP_DIR"
     
-    EXILED_URL="https://github.com/ExMod-Team/EXILED/releases/download/latest/Exiled.Installer-Linux"
-    if [ "$SCPSL_EXILED" -eq 2 ]; then
-        log_info "Using Exiled pre-release version"
+    # Get the latest release tag from GitHub API
+    log_info "Fetching latest Exiled release information..."
+    set +e
+    API_RESPONSE=$(curl -sL "https://api.github.com/repos/ExMod-Team/EXILED/releases")
+    API_EXIT=$?
+    set -e
+    
+    if [ $API_EXIT -ne 0 ] || [ -z "$API_RESPONSE" ]; then
+        log_error "Failed to fetch Exiled releases from GitHub API (exit code: $API_EXIT)"
+        log_error "API response: ${API_RESPONSE:0:200}"
+        EXILED_RELEASE_TAG=""
     else
-        log_info "Using Exiled stable version"
+        if [ "$SCPSL_EXILED" -eq 2 ]; then
+            log_info "Using Exiled pre-release version"
+            # For pre-releases, get the latest release (which may include pre-releases)
+            EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep -oP '"tag_name":\s*"\K[^"]+' 2>/dev/null | head -1)
+            # Fallback if grep -P not available
+            if [ -z "$EXILED_RELEASE_TAG" ]; then
+                EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep '"tag_name"' | head -1 | sed -n 's/.*"tag_name":\s*"\([^"]*\)".*/\1/p')
+            fi
+        else
+            log_info "Using Exiled stable version"
+            # For stable releases, get the latest non-prerelease
+            EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep -oP '"tag_name":\s*"\K[^"]+' 2>/dev/null | grep -vE "(alpha|beta|rc)" | head -1)
+            # Fallback if grep -P not available
+            if [ -z "$EXILED_RELEASE_TAG" ]; then
+                EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep '"tag_name"' | grep -vE "(alpha|beta|rc)" | head -1 | sed -n 's/.*"tag_name":\s*"\([^"]*\)".*/\1/p')
+            fi
+            # Fallback to any latest release if no stable found
+            if [ -z "$EXILED_RELEASE_TAG" ]; then
+                log_warning "No stable release found, falling back to latest release"
+                EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep -oP '"tag_name":\s*"\K[^"]+' 2>/dev/null | head -1)
+                if [ -z "$EXILED_RELEASE_TAG" ]; then
+                    EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep '"tag_name"' | head -1 | sed -n 's/.*"tag_name":\s*"\([^"]*\)".*/\1/p')
+                fi
+            fi
+        fi
     fi
     
-    log_info "Downloading Exiled installer from: $EXILED_URL"
-    if curl -L -f "$EXILED_URL" -o Exiled.Installer-Linux; then
-        chmod +x Exiled.Installer-Linux
+    if [ -z "$EXILED_RELEASE_TAG" ]; then
+        log_error "Failed to extract Exiled release tag from API response"
+        log_error "API response preview: ${API_RESPONSE:0:500}"
+        log_error "This could be due to network issues, API rate limiting, or unexpected API response format"
+    else
+        EXILED_URL="https://github.com/ExMod-Team/EXILED/releases/download/${EXILED_RELEASE_TAG}/Exiled.Installer-Linux"
+        log_info "Latest release tag: $EXILED_RELEASE_TAG"
+        log_info "Downloading Exiled installer from: $EXILED_URL"
         
-        if ! file Exiled.Installer-Linux | grep -qE "(ELF|executable|binary)"; then
+        if curl -L -f "$EXILED_URL" -o Exiled.Installer-Linux; then
+            chmod +x Exiled.Installer-Linux
+            
+            if ! file Exiled.Installer-Linux | grep -qE "(ELF|executable|binary)"; then
             log_error "Downloaded file is not a valid executable"
             log_error "This might be a GitHub error page. Check the URL: $EXILED_URL"
             rm -f Exiled.Installer-Linux
@@ -160,9 +200,10 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
                 log_error "Exiled installation may have failed. Please check the installer output above."
             fi
         fi
-    else
-        log_error "Failed to download Exiled installer from $EXILED_URL"
-        log_error "This could be due to network issues or the URL being incorrect"
+        else
+            log_error "Failed to download Exiled installer from $EXILED_URL"
+            log_error "This could be due to network issues or the URL being incorrect"
+        fi
     fi
 else
     log_info "Skipping Exiled installation (disabled)"
