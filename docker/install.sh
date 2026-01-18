@@ -169,8 +169,10 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
                 cp Exiled.Installer-Linux "$SERVER_DIR/"
                 cd "$SERVER_DIR"
                 
-                INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\" --exiled \"$APPDATA_DIR\""
+                # Build installer command with required flags
+                INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\" --exiled \"$APPDATA_DIR\" --exit --skip-version-select"
                 
+                # Add pre-releases flag if requested
                 if [ "$SCPSL_EXILED" -eq 2 ]; then
                     INSTALLER_CMD="$INSTALLER_CMD --pre-releases"
                 fi
@@ -187,22 +189,40 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
             
             rm -f "$SERVER_DIR/Exiled.Installer-Linux"
             
-            EXILED_DLL="$SERVER_DIR/SCPSL_Data/Managed/Assembly-CSharp.dll"
-            EXILED_PLUGINS_DIR="$APPDATA_DIR/SCP Secret Laboratory/LabAPI/plugins/global"
-            
-            if [ -f "$EXILED_DLL" ] && [ -d "$EXILED_PLUGINS_DIR" ]; then
-                log_success "Exiled installed successfully and verified!"
-                log_info "  - Exiled plugins directory found at $EXILED_PLUGINS_DIR"
+            # Check if installer failed
+            if [ $INSTALLER_EXIT -ne 0 ]; then
+                log_error "Exiled installer exited with error code: $INSTALLER_EXIT"
+                log_error "Please check the installer output above for details"
             else
-                log_warning "Exiled installation verification failed:"
-                [ ! -f "$EXILED_DLL" ] && log_warning "  - Assembly-CSharp.dll not found at $EXILED_DLL"
-                [ ! -d "$EXILED_PLUGINS_DIR" ] && log_warning "  - Exiled plugins directory not found at $EXILED_PLUGINS_DIR"
+                # Verify installation by checking for expected files
+                EXILED_DLL="$SERVER_DIR/SCPSL_Data/Managed/Assembly-CSharp.dll"
+                EXILED_PLUGINS_DIR="$APPDATA_DIR/SCP Secret Laboratory/LabAPI/plugins/global"
                 
-                if echo "$INSTALLER_OUTPUT" | grep -qi "error\|failed\|cannot"; then
-                    log_error "Installer output indicates an error occurred"
+                # Check for installation completion message
+                if echo "$INSTALLER_OUTPUT" | grep -qi "Installation complete"; then
+                    log_success "Exiled installed successfully!"
+                    
+                    # Additional verification if files exist
+                    if [ -f "$EXILED_DLL" ]; then
+                        log_info "  - Assembly-CSharp.dll found at $EXILED_DLL"
+                    fi
+                    
+                    if [ -d "$EXILED_PLUGINS_DIR" ]; then
+                        log_info "  - Exiled plugins directory found at $EXILED_PLUGINS_DIR"
+                    else
+                        log_warning "  - Exiled plugins directory not found at $EXILED_PLUGINS_DIR (may be normal depending on installation path)"
+                    fi
+                else
+                    log_warning "Exiled installation verification incomplete:"
+                    [ ! -f "$EXILED_DLL" ] && log_warning "  - Assembly-CSharp.dll not found at $EXILED_DLL"
+                    [ ! -d "$EXILED_PLUGINS_DIR" ] && log_warning "  - Exiled plugins directory not found at $EXILED_PLUGINS_DIR"
+                    
+                    if echo "$INSTALLER_OUTPUT" | grep -qi "error\|failed\|cannot\|exception"; then
+                        log_error "Installer output indicates an error occurred"
+                    fi
+                    
+                    log_warning "Please check the installer output above to verify installation"
                 fi
-                
-                log_error "Exiled installation may have failed. Please check the installer output above."
             fi
         fi
         else
