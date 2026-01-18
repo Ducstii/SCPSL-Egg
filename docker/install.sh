@@ -30,7 +30,7 @@ echo "###############################################################"
 
 log_info "Installing dependencies..."
 apt-get update -qq
-apt-get install -y -qq unzip libicu-dev lib32gcc-s1 curl ca-certificates
+apt-get install -y -qq unzip libicu-dev lib32gcc-s1 curl ca-certificates file
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 log_success "Dependencies installed"
@@ -153,25 +153,30 @@ if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
         if curl -L -f "$EXILED_URL" -o Exiled.Installer-Linux; then
             chmod +x Exiled.Installer-Linux
             
-            if ! file Exiled.Installer-Linux | grep -qE "(ELF|executable|binary)"; then
-            log_error "Downloaded file is not a valid executable"
-            log_error "This might be a GitHub error page. Check the URL: $EXILED_URL"
-            rm -f Exiled.Installer-Linux
-        else
-            SERVER_DIR="/mnt/server/.bin/SCPSLDS"
-            APPDATA_DIR="/mnt/server/.config"
-            
-            cp Exiled.Installer-Linux "$SERVER_DIR/"
-            cd "$SERVER_DIR"
-            
-            INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\" --exiled \"$APPDATA_DIR\""
-            
-            if [ "$SCPSL_EXILED" -eq 2 ]; then
-                INSTALLER_CMD="$INSTALLER_CMD --pre-releases"
-            fi
-            
-            log_info "Running Exiled installer from server directory..."
-            log_info "Command: $INSTALLER_CMD"
+            # Verify the downloaded file is an executable
+            FILE_CHECK=$(file Exiled.Installer-Linux 2>/dev/null || echo "")
+            if [ -z "$FILE_CHECK" ]; then
+                log_warning "Unable to verify file type (file command failed), proceeding anyway"
+            elif ! echo "$FILE_CHECK" | grep -qE "(ELF|executable|binary)"; then
+                log_error "Downloaded file is not a valid executable"
+                log_error "File type: $FILE_CHECK"
+                log_error "This might be a GitHub error page. Check the URL: $EXILED_URL"
+                rm -f Exiled.Installer-Linux
+            else
+                SERVER_DIR="/mnt/server/.bin/SCPSLDS"
+                APPDATA_DIR="/mnt/server/.config"
+                
+                cp Exiled.Installer-Linux "$SERVER_DIR/"
+                cd "$SERVER_DIR"
+                
+                INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\" --exiled \"$APPDATA_DIR\""
+                
+                if [ "$SCPSL_EXILED" -eq 2 ]; then
+                    INSTALLER_CMD="$INSTALLER_CMD --pre-releases"
+                fi
+                
+                log_info "Running Exiled installer from server directory..."
+                log_info "Command: $INSTALLER_CMD"
             
             set +e
             INSTALLER_OUTPUT=$(eval $INSTALLER_CMD 2>&1)
