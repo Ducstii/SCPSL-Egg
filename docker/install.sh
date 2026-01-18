@@ -251,3 +251,34 @@ echo "  • Exiled: $([ "${SCPSL_EXILED:-1}" -ne 0 ] && echo '✓ Installed' || 
 echo ""
 log_info "Server is ready to start!"
 echo "###############################################################"
+
+# If entrypoint script exists and we're not in installation-only mode, start the server
+if [ "${INSTALL_ONLY:-0}" -ne 1 ]; then
+    if [ -f "/entrypoint.sh" ]; then
+        echo ""
+        log_info "Starting server using entrypoint script..."
+        echo ""
+        exec /entrypoint.sh
+    elif [ -f "/home/container/entrypoint.sh" ]; then
+        echo ""
+        log_info "Starting server using entrypoint script..."
+        echo ""
+        exec /home/container/entrypoint.sh
+    elif [ -f "/mnt/server/.bin/SCPSLDS/LocalAdmin" ]; then
+        # Entrypoint not available, start server directly
+        echo ""
+        log_info "Starting server directly..."
+        echo ""
+        cd /mnt/server/.bin/SCPSLDS || exit 1
+        export SCPSL_PORT=${SCPSL_PORT:-7777}
+        exec ./LocalAdmin "${SCPSL_PORT}"
+    else
+        echo ""
+        log_info "Installation complete. Server will start when container is started."
+        echo ""
+    fi
+else
+    echo ""
+    log_info "Installation complete. Server will start when container is started."
+    echo ""
+fi
