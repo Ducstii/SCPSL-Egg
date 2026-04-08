@@ -1,284 +1,324 @@
 #!/bin/bash
+# SCPSL-Egg install — https://github.com/Ducstii/SCPSL-Egg · ducstii
 
-set -e
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+set -euo pipefail
 
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+readonly AUTHOR="ducstii"
+readonly REPO_URL="https://github.com/Ducstii/SCPSL-Egg"
+readonly STEAMCMD_URL="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+readonly STEAMCMD_FALLBACK="https://media.steampowered.com/client/installer/steamcmd_linux.tar.gz"
+readonly SCPSL_APP_ID="996560"
+readonly EXILED_API="https://api.github.com/repos/ExMod-Team/EXILED/releases"
+
+# Paths: must match docker/paths.inc.sh (install is curl’d standalone — no source).
+readonly PD_GAME_REL="server"
+readonly PD_DATA_REL="appdata"
+readonly PD_WORK_REL="tmp"
+readonly PD_LEGACY_REL=".bin/SCPSLDS"
+readonly SRV="/mnt/server"
+readonly PD_GAME_ABS="${SRV}/${PD_GAME_REL}"
+readonly PD_DATA_ABS="${SRV}/${PD_DATA_REL}"
+readonly PD_WORK_ABS="${SRV}/${PD_WORK_REL}"
+
+# ── ANSI (disabled when stdout is not a TTY — cleaner in raw panel logs) ─────
+if [[ -t 1 ]]; then
+    R='\033[0;31m'
+    G='\033[0;32m'
+    Y='\033[1;33m'
+    C='\033[0;36m'
+    DIM='\033[2m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+else
+    R= G= Y= C= DIM= BOLD= NC=
+fi
+
+log_info()    { echo -e "${C}·${NC} $*"; }
+log_ok()      { echo -e "${G}✓${NC} $*"; }
+log_warn()    { echo -e "${Y}!${NC} $*"; }
+log_err()     { echo -e "${R}✗${NC} $*" >&2; }
+
+banner_top() {
+    echo ""
+    echo -e "${C}╭${NC}${DIM}────────────────────────────────────────────────────────────${NC}${C}╮${NC}"
+    echo -e "${C}│${NC}  ${BOLD}SCP: Secret Laboratory${NC}  ${DIM}· dedicated server installer${NC}"
+    echo -e "${C}│${NC}  ${DIM}${BOLD}${AUTHOR}${NC}${DIM}  ·  ${REPO_URL}${NC}"
+    echo -e "${C}╰${NC}${DIM}────────────────────────────────────────────────────────────${NC}${C}╯${NC}"
+    echo ""
 }
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+banner_done() {
+    echo ""
+    echo -e "${G}╭${NC}${DIM}────────────────────────────────────────────────────────────${NC}${G}╮${NC}"
+    echo -e "${G}│${NC}  ${BOLD}Install finished${NC}  ${DIM}— start the server from the panel when you are ready.${NC}"
+    echo -e "${G}╰${NC}${DIM}────────────────────────────────────────────────────────────${NC}${G}╯${NC}"
+    echo ""
 }
 
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+phase() {
+    # $1 = title, $2 = step id e.g. 1/5
+    echo -e "\n${DIM}[${2}]${NC} ${BOLD}${1}${NC}"
 }
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+hr() { echo -e "${DIM}────────────────────────────────────────────────────────────${NC}"; }
+
+exiled_release_tag() {
+    local mode="$1" json="$2"
+    if ! command -v jq &>/dev/null; then
+        log_err "jq missing — dependency install failed?"
+        return 1
+    fi
+    if [[ "$mode" == "2" ]]; then
+        jq -r '.[0].tag_name // empty' <<<"$json"
+    else
+        jq -r '[.[] | select(.prerelease == false)] | .[0].tag_name // empty' <<<"$json"
+    fi
 }
 
-echo "###############################################################"
-echo "#                 SCP:SL Server Installer                      #"
-echo "#              With Exiled Framework Support                   #"
-echo "###############################################################"
+fetch_exiled_tag() {
+    local mode="${SCPSL_EXILED:-1}"
+    local hdr=(-H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+    [[ -n "${GITHUB_TOKEN:-}" ]] && hdr+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 
-log_info "Installing dependencies..."
+    local json
+    json=$(curl -fsSL "${hdr[@]}" "$EXILED_API" 2>/dev/null) || true
+    if [[ -z "$json" ]] || ! echo "$json" | jq -e . &>/dev/null; then
+        log_warn "First GitHub request failed or was not JSON. Retrying without a token…"
+        json=$(curl -fsSL -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$EXILED_API" 2>/dev/null) || true
+    fi
+
+    if [[ -z "$json" ]]; then
+        log_err "Empty response from GitHub (network or firewall)."
+        return 1
+    fi
+
+    if echo "$json" | jq -e 'type == "object" and (.message | type == "string")' &>/dev/null; then
+        log_err "GitHub API: $(echo "$json" | jq -r '.message')"
+        return 1
+    fi
+
+    if ! echo "$json" | jq -e 'type == "array"' &>/dev/null; then
+        log_err "Unexpected GitHub response shape (expected a releases array)."
+        return 1
+    fi
+
+    local tag
+    tag=$(exiled_release_tag "$mode" "$json")
+    if [[ -z "$tag" && "$mode" != "2" ]]; then
+        log_warn "No stable (non-prerelease) release; using newest entry in the feed."
+        tag=$(echo "$json" | jq -r '.[0].tag_name // empty')
+    fi
+
+    if [[ -z "$tag" ]]; then
+        log_err "Could not resolve an Exiled release tag."
+        return 1
+    fi
+
+    printf '%s\n' "$tag"
+    return 0
+}
+
+download_steamcmd() {
+    local dest="$1"
+    mkdir -p "$dest"
+    cd "$dest"
+    if curl -fsSL --retry 3 --retry-delay 2 "$STEAMCMD_URL" | tar zxf -; then
+        chmod +x steamcmd.sh linux32/steamcmd 2>/dev/null || true
+        return 0
+    fi
+    log_warn "Primary CDN failed; trying alternate mirror…"
+    if curl -fsSL --retry 3 --retry-delay 2 "$STEAMCMD_FALLBACK" | tar zxf -; then
+        chmod +x steamcmd.sh linux32/steamcmd 2>/dev/null || true
+        return 0
+    fi
+    return 1
+}
+
+run_steamcmd_install() {
+    local steamdir="$1"
+    cd "$steamdir"
+    local -a args=(
+        +force_install_dir "$PD_GAME_ABS"
+        +login anonymous
+        +app_update "$SCPSL_APP_ID"
+    )
+    if [[ -n "${SCPSL_BETA_NAME:-}" && "$SCPSL_BETA_NAME" != "public" ]]; then
+        args+=( -beta "$SCPSL_BETA_NAME" )
+        if [[ -n "${SCPSL_BETA_PASS:-}" && "$SCPSL_BETA_PASS" != "none" ]]; then
+            args+=( -betapassword "$SCPSL_BETA_PASS" )
+        fi
+    fi
+    args+=( validate +quit )
+    ./steamcmd.sh "${args[@]}"
+}
+
+ensure_container_user() {
+    if id -u container &>/dev/null; then
+        return 0
+    fi
+    if useradd -m -d /home/container -s /bin/bash container 2>/dev/null; then
+        return 0
+    fi
+    log_warn "Could not create user 'container'; leaving file ownership unchanged."
+    return 1
+}
+
+# ── main ──────────────────────────────────────────────────────────────────────
+banner_top
+
+phase "Dependencies" "1/5"
 apt-get update -qq
-apt-get install -y -qq unzip libicu-dev lib32gcc-s1 curl ca-certificates file
+apt-get install -y -qq unzip libicu-dev lib32gcc-s1 curl ca-certificates file jq
 apt-get clean
 rm -rf /var/lib/apt/lists/*
-log_success "Dependencies installed"
+log_ok "Packages ready (incl. jq for release metadata)."
 
-log_info "Cleaning old installation..."
-rm -rf /mnt/server/.bin
-mkdir -p /mnt/server/{.bin,.config}
-log_success "Cleanup completed"
+hr
+phase "Prepare server directory" "2/5"
+log_info "Resetting server, appdata, tmp, and old layouts…"
+rm -rf "${PD_GAME_ABS}" "${PD_DATA_ABS}" "${PD_WORK_ABS}" "${SRV}/.bin" "${SRV}/.local/srv-7a4e2f"
+mkdir -p "${PD_GAME_ABS}" "${PD_DATA_ABS}" "${PD_WORK_ABS}"
+log_ok "Directories ready: ${PD_GAME_REL}, ${PD_DATA_REL}, ${PD_WORK_REL}."
 
-log_info "Downloading SteamCMD..."
-mkdir -p /mnt/server/.bin/SteamCMD
-cd /mnt/server/.bin/SteamCMD
-
-if curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf -; then
-    chmod +x steamcmd.sh linux32/steamcmd 2>/dev/null || true
-    log_success "SteamCMD downloaded"
-else
-    log_error "Failed to download SteamCMD"
+hr
+phase "Steam update client" "3/5"
+log_info "Fetching Steam update client (may take a moment)…"
+if ! download_steamcmd "${PD_WORK_ABS}"; then
+    log_err "Download of the Steam client tools failed from all mirrors."
     exit 1
 fi
+log_ok "Steam tools unpacked into workspace."
 
-log_info "Downloading SCP:SL Dedicated Server..."
-log_info "Beta: ${SCPSL_BETA_NAME:-public}"
+hr
+phase "Game server files" "4/5"
+log_info "App ${SCPSL_APP_ID} · branch ${SCPSL_BETA_NAME:-public}"
 
-STEAMCMD_COMMAND="./steamcmd.sh +force_install_dir /mnt/server/.bin/SCPSLDS +login anonymous +app_update 996560"
-
-if [ -n "$SCPSL_BETA_NAME" ] && [ "$SCPSL_BETA_NAME" != "public" ]; then
-    STEAMCMD_COMMAND="$STEAMCMD_COMMAND -beta \"$SCPSL_BETA_NAME\""
-    
-    if [ -n "$SCPSL_BETA_PASS" ] && [ "$SCPSL_BETA_PASS" != "none" ]; then
-        STEAMCMD_COMMAND="$STEAMCMD_COMMAND -betapassword \"$SCPSL_BETA_PASS\""
-    fi
-fi
-
-STEAMCMD_COMMAND="$STEAMCMD_COMMAND validate +quit"
-
-MAX_RETRIES=3
-RETRY_COUNT=0
-
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    log_info "Downloading server (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
-    
-    if eval $STEAMCMD_COMMAND; then
-        log_success "Server downloaded successfully!"
+retries=3
+attempt=1
+while [[ $attempt -le $retries ]]; do
+    log_info "Content download (attempt ${attempt}/${retries})…"
+    if run_steamcmd_install "${PD_WORK_ABS}"; then
+        log_ok "Game server files downloaded."
         break
-    else
-        RETRY_COUNT=$((RETRY_COUNT + 1))
-        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-            log_warning "Download failed, retrying in 5 seconds..."
-            sleep 5
-        else
-            log_error "Failed to download server after $MAX_RETRIES attempts"
-            exit 1
-        fi
     fi
+    if [[ $attempt -eq $retries ]]; then
+        log_err "Steam update could not finish after ${retries} attempts."
+        exit 1
+    fi
+    log_warn "Steam update failed — waiting 8s before retry…"
+    sleep 8
+    attempt=$((attempt + 1))
 done
 
-if [ ! -f "/mnt/server/.bin/SCPSLDS/LocalAdmin" ]; then
-    log_error "Server installation failed - LocalAdmin not found"
+if [[ ! -f "${PD_GAME_ABS}/LocalAdmin" ]]; then
+    log_err "LocalAdmin missing under ${PD_GAME_REL} — install incomplete."
     exit 1
 fi
+chmod +x "${PD_GAME_ABS}/LocalAdmin"
 
-chmod +x /mnt/server/.bin/SCPSLDS/LocalAdmin
-log_success "SCP:SL server installed"
-
-if [ "${SCPSL_EXILED:-1}" -ne 0 ]; then
-    log_info "Installing Exiled framework..."
-    EXILED_TEMP_DIR="/mnt/server/.bin/ExiledInstaller"
-    mkdir -p "$EXILED_TEMP_DIR"
-    cd "$EXILED_TEMP_DIR"
-    
-    # Get the latest release tag from GitHub API
-    log_info "Fetching latest Exiled release information..."
-    set +e
-    API_RESPONSE=$(curl -sL "https://api.github.com/repos/ExMod-Team/EXILED/releases")
-    API_EXIT=$?
-    set -e
-    
-    if [ $API_EXIT -ne 0 ] || [ -z "$API_RESPONSE" ]; then
-        log_error "Failed to fetch Exiled releases from GitHub API (exit code: $API_EXIT)"
-        log_error "API response: ${API_RESPONSE:0:200}"
-        EXILED_RELEASE_TAG=""
+hr
+phase "Exiled (optional)" "5/5"
+if [[ "${SCPSL_EXILED:-1}" -eq 0 ]]; then
+    log_info "Exiled disabled (SCPSL_EXILED=0) — skipping."
+else
+    if [[ "${SCPSL_EXILED:-1}" -eq 2 ]]; then
+        log_info "Exiled channel: ${BOLD}pre-release${NC}"
     else
-        if [ "$SCPSL_EXILED" -eq 2 ]; then
-            log_info "Using Exiled pre-release version"
-            # For pre-releases, get the latest release (which may include pre-releases)
-            EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep -oP '"tag_name":\s*"\K[^"]+' 2>/dev/null | head -1)
-            # Fallback if grep -P not available
-            if [ -z "$EXILED_RELEASE_TAG" ]; then
-                EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep '"tag_name"' | head -1 | sed -n 's/.*"tag_name":\s*"\([^"]*\)".*/\1/p')
-            fi
-        else
-            log_info "Using Exiled stable version"
-            # For stable releases, get the latest non-prerelease
-            EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep -oP '"tag_name":\s*"\K[^"]+' 2>/dev/null | grep -vE "(alpha|beta|rc)" | head -1)
-            # Fallback if grep -P not available
-            if [ -z "$EXILED_RELEASE_TAG" ]; then
-                EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep '"tag_name"' | grep -vE "(alpha|beta|rc)" | head -1 | sed -n 's/.*"tag_name":\s*"\([^"]*\)".*/\1/p')
-            fi
-            # Fallback to any latest release if no stable found
-            if [ -z "$EXILED_RELEASE_TAG" ]; then
-                log_warning "No stable release found, falling back to latest release"
-                EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep -oP '"tag_name":\s*"\K[^"]+' 2>/dev/null | head -1)
-                if [ -z "$EXILED_RELEASE_TAG" ]; then
-                    EXILED_RELEASE_TAG=$(echo "$API_RESPONSE" | grep '"tag_name"' | head -1 | sed -n 's/.*"tag_name":\s*"\([^"]*\)".*/\1/p')
-                fi
-            fi
-        fi
+        log_info "Exiled channel: ${BOLD}stable${NC}"
     fi
-    
-    if [ -z "$EXILED_RELEASE_TAG" ]; then
-        log_error "Failed to extract Exiled release tag from API response"
-        log_error "API response preview: ${API_RESPONSE:0:500}"
-        log_error "This could be due to network issues, API rate limiting, or unexpected API response format"
+
+    EXILED_RELEASE_TAG=""
+    if ! EXILED_RELEASE_TAG="$(fetch_exiled_tag)"; then
+        EXILED_RELEASE_TAG=""
+    fi
+
+    if [[ -z "$EXILED_RELEASE_TAG" ]]; then
+        log_warn "Skipping Exiled — fix network or set GITHUB_TOKEN if you hit API rate limits."
     else
         EXILED_URL="https://github.com/ExMod-Team/EXILED/releases/download/${EXILED_RELEASE_TAG}/Exiled.Installer-Linux"
-        log_info "Latest release tag: $EXILED_RELEASE_TAG"
-        log_info "Downloading Exiled installer from: $EXILED_URL"
-        
-        if curl -L -f "$EXILED_URL" -o Exiled.Installer-Linux; then
+        log_info "Release ${BOLD}${EXILED_RELEASE_TAG}${NC}"
+        mkdir -p "${PD_WORK_ABS}"
+        cd "${PD_WORK_ABS}"
+
+        if curl -fsSL --retry 3 --retry-delay 2 -o Exiled.Installer-Linux "$EXILED_URL"; then
             chmod +x Exiled.Installer-Linux
-            
-            # Verify the downloaded file is an executable
-            FILE_CHECK=$(file Exiled.Installer-Linux 2>/dev/null || echo "")
-            if [ -z "$FILE_CHECK" ]; then
-                log_warning "Unable to verify file type (file command failed), proceeding anyway"
-            elif ! echo "$FILE_CHECK" | grep -qE "(ELF|executable|binary)"; then
-                log_error "Downloaded file is not a valid executable"
-                log_error "File type: $FILE_CHECK"
-                log_error "This might be a GitHub error page. Check the URL: $EXILED_URL"
+            ft="$(file -b Exiled.Installer-Linux 2>/dev/null || true)"
+            if [[ -n "$ft" ]] && ! grep -qE 'ELF|executable|binary' <<<"$ft"; then
+                log_err "Download is not a Linux binary (got: ${ft:0:80}…)"
                 rm -f Exiled.Installer-Linux
             else
-                SERVER_DIR="/mnt/server/.bin/SCPSLDS"
-                APPDATA_DIR="/mnt/server/.config"
-                
-                cp Exiled.Installer-Linux "$SERVER_DIR/"
+                SERVER_DIR="${PD_GAME_ABS}"
+                APPDATA_DIR="${PD_DATA_ABS}"
+                cp -f Exiled.Installer-Linux "$SERVER_DIR/"
                 cd "$SERVER_DIR"
-                
-                # Build installer command with required flags
-                INSTALLER_CMD="./Exiled.Installer-Linux --path \"$SERVER_DIR\" --appdata \"$APPDATA_DIR\" --exiled \"$APPDATA_DIR\" --exit --skip-version-select"
-                
-                # Add pre-releases flag if requested
-                if [ "$SCPSL_EXILED" -eq 2 ]; then
-                    INSTALLER_CMD="$INSTALLER_CMD --pre-releases"
-                fi
-                
-                log_info "Running Exiled installer from server directory..."
-                log_info "Command: $INSTALLER_CMD"
-            
-            set +e
-            INSTALLER_OUTPUT=$(eval $INSTALLER_CMD 2>&1)
-            INSTALLER_EXIT=$?
-            set -e
-            
-            echo "$INSTALLER_OUTPUT"
-            
-            rm -f "$SERVER_DIR/Exiled.Installer-Linux"
-            
-            # Check if installer failed
-            if [ $INSTALLER_EXIT -ne 0 ]; then
-                log_error "Exiled installer exited with error code: $INSTALLER_EXIT"
-                log_error "Please check the installer output above for details"
-            else
-                # Verify installation by checking for expected files
-                EXILED_DLL="$SERVER_DIR/SCPSL_Data/Managed/Assembly-CSharp.dll"
-                EXILED_PLUGINS_DIR="$APPDATA_DIR/SCP Secret Laboratory/LabAPI/plugins/global"
-                
-                # Check for installation completion message
-                if echo "$INSTALLER_OUTPUT" | grep -qi "Installation complete"; then
-                    log_success "Exiled installed successfully!"
-                    
-                    # Additional verification if files exist
-                    if [ -f "$EXILED_DLL" ]; then
-                        log_info "  - Assembly-CSharp.dll found at $EXILED_DLL"
-                    fi
-                    
-                    if [ -d "$EXILED_PLUGINS_DIR" ]; then
-                        log_info "  - Exiled plugins directory found at $EXILED_PLUGINS_DIR"
-                    else
-                        log_warning "  - Exiled plugins directory not found at $EXILED_PLUGINS_DIR (may be normal depending on installation path)"
-                    fi
+
+                set +e
+                if [[ "${SCPSL_EXILED:-1}" -eq 2 ]]; then
+                    INSTALLER_OUTPUT="$(./Exiled.Installer-Linux \
+                        --path "$SERVER_DIR" \
+                        --appdata "$APPDATA_DIR" \
+                        --exiled "$APPDATA_DIR" \
+                        --exit --skip-version-select --pre-releases 2>&1)"
                 else
-                    log_warning "Exiled installation verification incomplete:"
-                    [ ! -f "$EXILED_DLL" ] && log_warning "  - Assembly-CSharp.dll not found at $EXILED_DLL"
-                    [ ! -d "$EXILED_PLUGINS_DIR" ] && log_warning "  - Exiled plugins directory not found at $EXILED_PLUGINS_DIR"
-                    
-                    if echo "$INSTALLER_OUTPUT" | grep -qi "error\|failed\|cannot\|exception"; then
-                        log_error "Installer output indicates an error occurred"
-                    fi
-                    
-                    log_warning "Please check the installer output above to verify installation"
+                    INSTALLER_OUTPUT="$(./Exiled.Installer-Linux \
+                        --path "$SERVER_DIR" \
+                        --appdata "$APPDATA_DIR" \
+                        --exiled "$APPDATA_DIR" \
+                        --exit --skip-version-select 2>&1)"
+                fi
+                INSTALLER_EXIT=$?
+                set -e
+
+                printf '%s\n' "$INSTALLER_OUTPUT"
+                rm -f "$SERVER_DIR/Exiled.Installer-Linux"
+
+                if [[ $INSTALLER_EXIT -ne 0 ]]; then
+                    log_err "Exiled installer exited with code ${INSTALLER_EXIT}."
+                elif grep -qi 'Installation complete' <<<"$INSTALLER_OUTPUT"; then
+                    log_ok "Exiled installed."
+                else
+                    log_warn "Exiled finished without a clear success string — check output above."
                 fi
             fi
-        fi
         else
-            log_error "Failed to download Exiled installer from $EXILED_URL"
-            log_error "This could be due to network issues or the URL being incorrect"
+            log_err "Could not download Exiled installer."
         fi
     fi
-else
-    log_info "Skipping Exiled installation (disabled)"
 fi
 
-log_info "Cleaning up installation files..."
-rm -rf /mnt/server/.bin/SteamCMD
-rm -rf /mnt/server/.bin/ExiledInstaller
+hr
+log_info "Removing workspace scratch dir (${PD_WORK_REL})…"
+rm -rf "${PD_WORK_ABS}"
 
-chown -R container:container /mnt/server 2>/dev/null || true
+if ensure_container_user; then
+    chown -R container:container /mnt/server
+    log_ok "Ownership set to user ${BOLD}container${NC} (matches game container)."
+fi
 
+banner_done
+echo -e "  ${DIM}SCP:SL${NC}     ${G}installed${NC}"
+if [[ "${SCPSL_EXILED:-1}" -eq 0 ]]; then
+    echo -e "  ${DIM}Exiled${NC}     ${Y}skipped${NC}"
+else
+    echo -e "  ${DIM}Exiled${NC}     ${G}attempted (see logs above)${NC}"
+fi
 echo ""
-echo "###############################################################"
-log_success "Installation completed!"
-echo "###############################################################"
-echo ""
-log_info "Installation Summary:"
-echo "  • SCP:SL Server: ✓ Installed"
-echo "  • Exiled: $([ "${SCPSL_EXILED:-1}" -ne 0 ] && echo '✓ Installed' || echo '✗ Skipped')"
-echo ""
-log_info "Server is ready to start!"
-echo "###############################################################"
 
-# If entrypoint script exists and we're not in installation-only mode, start the server
-if [ "${INSTALL_ONLY:-0}" -ne 1 ]; then
-    if [ -f "/entrypoint.sh" ]; then
-        echo ""
-        log_info "Starting server using entrypoint script..."
-        echo ""
+# Post-install: panel usually does not chain into game image entrypoint from ubuntu installer.
+if [[ "${INSTALL_ONLY:-0}" != "1" ]]; then
+    if [[ -f /entrypoint.sh ]]; then
+        log_info "Handing off to ${BOLD}/entrypoint.sh${NC}…"
         exec /entrypoint.sh
-    elif [ -f "/home/container/entrypoint.sh" ]; then
-        echo ""
-        log_info "Starting server using entrypoint script..."
-        echo ""
-        exec /home/container/entrypoint.sh
-    elif [ -f "/mnt/server/.bin/SCPSLDS/LocalAdmin" ]; then
-        # Entrypoint not available, start server directly
-        echo ""
-        log_info "Starting server directly..."
-        echo ""
-        cd /mnt/server/.bin/SCPSLDS || exit 1
-        export SCPSL_PORT=${SCPSL_PORT:-7777}
-        exec ./LocalAdmin "${SCPSL_PORT}"
-    else
-        echo ""
-        log_info "Installation complete. Server will start when container is started."
-        echo ""
     fi
-else
-    echo ""
-    log_info "Installation complete. Server will start when container is started."
-    echo ""
+    if [[ -f /home/container/entrypoint.sh ]]; then
+        log_info "Handing off to entrypoint…"
+        exec /home/container/entrypoint.sh
+    fi
+    if [[ -f "${PD_GAME_ABS}/LocalAdmin" ]]; then
+        log_info "Starting LocalAdmin directly (no entrypoint in this environment)…"
+        cd "${PD_GAME_ABS}" || exit 1
+        export SCPSL_PORT="${SCPSL_PORT:-7777}"
+        exec ./LocalAdmin "${SCPSL_PORT}"
+    fi
 fi
+log_info "Install only — start the server from the panel when ready."

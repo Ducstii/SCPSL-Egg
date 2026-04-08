@@ -1,12 +1,17 @@
 ###############################################################
 #              SCP:SL Server Docker Container                 #
-#     Minimal Pterodactyl egg for SCP Secret Laboratory       #
+#     Pterodactyl egg — github.com/Ducstii/SCPSL-Egg         #
+#     Author: ducstii                                         #
 ###############################################################
 
 FROM ubuntu:24.04
 
-LABEL maintainer="MangoTeam"
-LABEL description="SCP:Secret Laboratory server container"
+LABEL maintainer="ducstii"
+LABEL description="SCP: Secret Laboratory server container (ducstii / SCPSL-Egg)"
+LABEL org.opencontainers.image.source="https://github.com/Ducstii/SCPSL-Egg"
+LABEL org.opencontainers.image.authors="ducstii"
+LABEL org.opencontainers.image.title="scpsl-egg"
+LABEL org.opencontainers.image.description="Runtime image for the ducstii SCPSL-Egg (Pterodactyl)."
 
 # Install dependencies in a single layer
 RUN apt-get update && \
@@ -27,6 +32,7 @@ ENV USER=container \
 
 WORKDIR /home/container
 
+COPY --chown=container:container ./paths.inc.sh /paths.inc.sh
 COPY --chown=container:container ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
