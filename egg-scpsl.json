@@ -1,21 +1,21 @@
 {
-    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "_comment": "SCP:SL egg by ducstii — https://github.com/Ducstii/SCPSL-Egg. Container image is built from docker/Dockerfile and published to GHCR via Actions.",
     "meta": {
         "version": "PTDL_v2",
         "update_url": null
     },
-    "exported_at": "2025-01-10T16:00:00+03:00",
+    "exported_at": "2026-04-08T12:00:00+00:00",
     "name": "SCP Secret Laboratory",
-    "author": "operated31@gmail.com",
-    "description": "Minimal SCP:SL server egg with Exiled framework support",
+    "author": "ducstii",
+    "description": "SCP: Secret Laboratory dedicated server with optional Exiled. Author: ducstii. Source + installer: https://github.com/Ducstii/SCPSL-Egg. Default image is the matching GHCR build from that repo (workflow publish-ghcr.yml).",
     "features": [
         "exiled"
     ],
     "docker_images": {
-        "naxefir2/scpsl-egg": "naxefir2/scpsl-egg:latest"
+        "SCPSL-Egg · ducstii (GHCR)": "ghcr.io/ducstii/scpsl-egg:latest"
     },
     "file_denylist": [],
-    "startup": "cd .bin/SCPSLDS && ./LocalAdmin {{SCPSL_PORT}}",
+    "startup": "cd server && ./LocalAdmin {{SCPSL_PORT}}",
     "config": {
         "files": "{}",
         "startup": "{\"done\": \"Waiting for players..\"}",
@@ -52,7 +52,7 @@
         },
         {
             "name": "Beta Branch",
-            "description": "SteamCMD beta branch (use 'public' for stable release)",
+            "description": "Steam beta branch for the dedicated server (use 'public' for stable)",
             "env_variable": "SCPSL_BETA_NAME",
             "default_value": "public",
             "user_viewable": true,
